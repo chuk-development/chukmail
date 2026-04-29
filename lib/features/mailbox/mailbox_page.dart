@@ -456,25 +456,51 @@ class _MailboxPageState extends ConsumerState<MailboxPage> {
             }
             return RefreshIndicator(
               onRefresh: _sync,
-              child: ListView.separated(
+              child: ListView.builder(
                 itemCount: messages.length,
-                separatorBuilder: (_, __) => const Divider(height: 1),
+                padding: const EdgeInsets.symmetric(vertical: 4),
                 itemBuilder: (_, i) {
                   final m = messages[i];
                   final isSelected = _selected.contains(m.id);
                   return Dismissible(
                     key: ValueKey('msg-${m.id}'),
-                    background: Container(
-                      color: Theme.of(context).colorScheme.tertiaryContainer,
-                      alignment: Alignment.centerLeft,
-                      padding: const EdgeInsets.symmetric(horizontal: 24),
-                      child: const Icon(Icons.archive_outlined),
+                    background: Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 2),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: Theme.of(context)
+                              .colorScheme
+                              .tertiaryContainer,
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        alignment: Alignment.centerLeft,
+                        padding:
+                            const EdgeInsets.symmetric(horizontal: 24),
+                        child: Icon(Icons.archive_outlined,
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onTertiaryContainer),
+                      ),
                     ),
-                    secondaryBackground: Container(
-                      color: Theme.of(context).colorScheme.errorContainer,
-                      alignment: Alignment.centerRight,
-                      padding: const EdgeInsets.symmetric(horizontal: 24),
-                      child: const Icon(Icons.delete_outline),
+                    secondaryBackground: Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 2),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: Theme.of(context)
+                              .colorScheme
+                              .errorContainer,
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        alignment: Alignment.centerRight,
+                        padding:
+                            const EdgeInsets.symmetric(horizontal: 24),
+                        child: Icon(Icons.delete_outline,
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onErrorContainer),
+                      ),
                     ),
                     confirmDismiss: (dir) async {
                       if (inSelection) return false;
@@ -575,6 +601,8 @@ class _MessageTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
     final from = msg.fromName?.isNotEmpty == true
         ? msg.fromName!
         : (msg.fromAddr ?? 'Unknown');
@@ -582,74 +610,160 @@ class _MessageTile extends StatelessWidget {
         ? msg.subject!
         : '(no subject)';
     final date = msg.date != null ? formatMessageDate(msg.date!) : '';
-    return ListTile(
-      onTap: onTap,
-      onLongPress: onLongPress,
-      selected: isSelected,
-      selectedTileColor:
-          Theme.of(context).colorScheme.primaryContainer.withOpacity(0.4),
-      leading: isSelected
-          ? CircleAvatar(
-              backgroundColor: Theme.of(context).colorScheme.primary,
-              child: const Icon(Icons.check, color: Colors.white),
-            )
-          : CircleAvatar(
-              child: Text(from.isNotEmpty
-                  ? from.characters.first.toUpperCase()
-                  : '?'),
-            ),
-      title: Text(
-        from,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(
-            fontWeight: msg.seen ? FontWeight.normal : FontWeight.bold),
-      ),
-      subtitle: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(subj,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                  fontWeight:
-                      msg.seen ? FontWeight.normal : FontWeight.w600)),
-          if (msg.preview != null)
-            Text(msg.preview!,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.bodySmall),
-        ],
-      ),
-      trailing: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          Text(date, style: Theme.of(context).textTheme.bodySmall),
-          const SizedBox(height: 4),
-          Row(mainAxisSize: MainAxisSize.min, children: [
-            if (msg.hasAttachments)
-              const Padding(
-                padding: EdgeInsets.only(right: 4),
-                child: Icon(Icons.attach_file, size: 16),
-              ),
-            InkWell(
-              onTap: inSelection ? null : onStarTap,
-              borderRadius: BorderRadius.circular(20),
-              child: Padding(
-                padding: const EdgeInsets.all(4),
-                child: Icon(
-                  msg.flagged ? Icons.star : Icons.star_outline,
-                  size: 18,
-                  color: msg.flagged
-                      ? Colors.amber
-                      : Theme.of(context).disabledColor,
+    final unread = !msg.seen;
+    final mutedColor = scheme.onSurfaceVariant;
+    final tileColor =
+        isSelected ? scheme.secondaryContainer : Colors.transparent;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      child: Material(
+        color: tileColor,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20)),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          onLongPress: onLongPress,
+          child: Padding(
+            padding:
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _Avatar(
+                  isSelected: isSelected,
+                  letter: from.isNotEmpty
+                      ? from.characters.first.toUpperCase()
+                      : '?',
+                  scheme: scheme,
                 ),
-              ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (unread)
+                            Container(
+                              margin: const EdgeInsets.only(top: 7, right: 8),
+                              width: 8,
+                              height: 8,
+                              decoration: BoxDecoration(
+                                color: scheme.primary,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                          Expanded(
+                            child: Text(
+                              from,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: tt.titleSmall?.copyWith(
+                                fontWeight: unread
+                                    ? FontWeight.w700
+                                    : FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            date,
+                            style: tt.labelSmall?.copyWith(
+                                color: mutedColor,
+                                fontWeight: unread
+                                    ? FontWeight.w600
+                                    : FontWeight.w400),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        subj,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: tt.bodyMedium?.copyWith(
+                          fontWeight: unread
+                              ? FontWeight.w600
+                              : FontWeight.w400,
+                        ),
+                      ),
+                      if ((msg.preview ?? '').isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Text(
+                            msg.preview!.replaceAll(RegExp(r'\s+'), ' '),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: tt.bodySmall?.copyWith(color: mutedColor),
+                          ),
+                        ),
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          if (msg.hasAttachments)
+                            Padding(
+                              padding: const EdgeInsets.only(right: 6),
+                              child: Icon(Icons.attach_file,
+                                  size: 14, color: mutedColor),
+                            ),
+                          const Spacer(),
+                          InkWell(
+                            onTap: inSelection ? null : onStarTap,
+                            borderRadius: BorderRadius.circular(20),
+                            child: Padding(
+                              padding: const EdgeInsets.all(4),
+                              child: Icon(
+                                msg.flagged
+                                    ? Icons.star_rounded
+                                    : Icons.star_outline_rounded,
+                                size: 20,
+                                color: msg.flagged
+                                    ? const Color(0xFFFFC107)
+                                    : mutedColor,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
-          ]),
-        ],
+          ),
+        ),
       ),
+    );
+  }
+}
+
+class _Avatar extends StatelessWidget {
+  final bool isSelected;
+  final String letter;
+  final ColorScheme scheme;
+  const _Avatar({
+    required this.isSelected,
+    required this.letter,
+    required this.scheme,
+  });
+  @override
+  Widget build(BuildContext context) {
+    if (isSelected) {
+      return CircleAvatar(
+        radius: 22,
+        backgroundColor: scheme.primary,
+        child: Icon(Icons.check, color: scheme.onPrimary),
+      );
+    }
+    return CircleAvatar(
+      radius: 22,
+      backgroundColor: scheme.primaryContainer,
+      foregroundColor: scheme.onPrimaryContainer,
+      child: Text(letter,
+          style: const TextStyle(
+              fontSize: 16, fontWeight: FontWeight.w600)),
     );
   }
 }
