@@ -94,13 +94,17 @@ class ImapService {
     final start = from < 1 ? 1 : from;
     final seq = MessageSequence.fromRange(start, box.messagesExists);
     final fetch = await c.fetchMessages(seq,
-        'BODY.PEEK[HEADER.FIELDS (FROM TO CC SUBJECT DATE MESSAGE-ID)] FLAGS UID RFC822.SIZE BODYSTRUCTURE');
+        '(UID FLAGS RFC822.SIZE ENVELOPE BODYSTRUCTURE)');
     int newCount = 0;
     final batch = d.batch();
     for (final m in fetch.messages) {
       final uid = m.uid;
       if (uid == null) continue;
-      final from = m.from?.isNotEmpty == true ? m.from!.first : null;
+      final env = m.envelope;
+      final fromList = m.from ?? env?.from ?? const <MailAddress>[];
+      final fromAddr = fromList.isNotEmpty ? fromList.first : null;
+      final toList = m.to ?? env?.to ?? const <MailAddress>[];
+      final ccList = m.cc ?? env?.cc ?? const <MailAddress>[];
       final hasAttach = _hasAttachments(m);
       final exists = await d.query('messages',
           columns: ['id'],
@@ -109,17 +113,21 @@ class ImapService {
       final seen = m.isSeen;
       final flagged = m.isFlagged;
       final answered = m.isAnswered;
+      final dateMs = (m.decodeDate() ?? env?.date)?.millisecondsSinceEpoch;
+      final subject = m.decodeSubject() ?? env?.subject;
+      final messageId =
+          m.getHeaderValue('message-id') ?? env?.messageId;
       final data = {
         'account_id': account.id,
         'folder_path': folderPath,
         'uid': uid,
-        'message_id': m.getHeaderValue('message-id'),
-        'subject': m.decodeSubject(),
-        'from_addr': from?.email,
-        'from_name': from?.personalName,
-        'to_addrs': _addrsJoin(m.to),
-        'cc_addrs': _addrsJoin(m.cc),
-        'date': m.decodeDate()?.millisecondsSinceEpoch,
+        'message_id': messageId,
+        'subject': subject,
+        'from_addr': fromAddr?.email,
+        'from_name': fromAddr?.personalName,
+        'to_addrs': toList.isEmpty ? null : toList.map((a) => a.email).join(','),
+        'cc_addrs': ccList.isEmpty ? null : ccList.map((a) => a.email).join(','),
+        'date': dateMs,
         'seen': seen ? 1 : 0,
         'flagged': flagged ? 1 : 0,
         'answered': answered ? 1 : 0,

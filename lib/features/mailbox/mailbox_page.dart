@@ -26,9 +26,24 @@ class _MailboxPageState extends ConsumerState<MailboxPage> {
     if (a == null) return;
     setState(() => _syncing = true);
     try {
-      await SyncService.syncAccount(a);
+      final n = await SyncService.syncAccount(a, folderPath: _folderPath);
       ref.invalidate(messagesProvider(MailboxKey(_accountId!, _folderPath)));
       ref.invalidate(foldersProvider(_accountId!));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(n == 0
+              ? 'Synced — no new mail'
+              : 'Synced — $n new'),
+          duration: const Duration(seconds: 2),
+        ));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Sync failed: $e'),
+          duration: const Duration(seconds: 6),
+        ));
+      }
     } finally {
       if (mounted) setState(() => _syncing = false);
     }

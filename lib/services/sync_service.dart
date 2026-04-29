@@ -5,20 +5,28 @@ import 'imap_service.dart';
 import 'notification_service.dart';
 
 class SyncService {
-  static Future<int> syncAccount(Account a, {int limit = 50}) async {
+  static Future<int> syncAccount(
+    Account a, {
+    int limit = 50,
+    String? folderPath,
+  }) async {
     final imap = ImapService(a);
     int total = 0;
     try {
       await imap.syncFolders();
       final d = await AppDb.instance.db;
-      final folders = await d.query('folders',
-          where: 'account_id = ?', whereArgs: [a.id]);
-      // Always sync inbox first, fully; other folders get header-only sync.
-      String inboxPath = 'INBOX';
-      for (final f in folders) {
-        if (f['role'] == 'inbox') inboxPath = f['path'] as String;
+      String targetPath;
+      if (folderPath != null) {
+        targetPath = folderPath;
+      } else {
+        final folders = await d.query('folders',
+            where: 'account_id = ?', whereArgs: [a.id]);
+        targetPath = 'INBOX';
+        for (final f in folders) {
+          if (f['role'] == 'inbox') targetPath = f['path'] as String;
+        }
       }
-      final newCount = await imap.syncFolder(inboxPath, limit: limit);
+      final newCount = await imap.syncFolder(targetPath, limit: limit);
       total += newCount;
       if (newCount > 0) {
         await NotificationService.instance.showNewMail(
