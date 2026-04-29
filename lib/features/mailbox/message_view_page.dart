@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:enough_mail/enough_mail.dart';
@@ -55,29 +56,36 @@ class _MessageViewPageState extends ConsumerState<MessageViewPage> {
       }
       final msg = StoredMessage.fromMap(rows.first);
       final account = await AccountStore.instance.byId(msg.accountId);
+      if (!mounted) return;
       setState(() {
         _msg = msg;
         _account = account;
         _allowRemote = !(account?.blockRemote ?? true);
+        _loading = false;
       });
-      if (account != null) {
-        await _fetchFull();
-        await _markSeen();
-      }
+      if (account == null) return;
+      // Always refresh in background so attachments and full MIME are
+      // available, but don't block the first paint.
+      unawaited(_refreshFull());
+      unawaited(_markSeen());
     } catch (e) {
-      setState(() => _error = e.toString());
-    } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted) {
+        setState(() {
+          _error = e.toString();
+          _loading = false;
+        });
+      }
     }
   }
 
-  Future<void> _fetchFull() async {
+  Future<void> _refreshFull() async {
     final a = _account;
     final m = _msg;
     if (a == null || m == null) return;
     final imap = ImapService(a);
     try {
       final full = await imap.fetchFull(m.folderPath, m.uid);
+      if (!mounted) return;
       setState(() => _full = full);
       final plain = full.decodeTextPlainPart();
       final html = full.decodeTextHtmlPart();
@@ -94,8 +102,17 @@ class _MessageViewPageState extends ConsumerState<MessageViewPage> {
           },
           where: 'id = ?',
           whereArgs: [m.id]);
-    } catch (e) {
-      setState(() => _error = 'Fetch failed: $e');
+      // Refresh _msg so cached body is also up to date
+      final rows = await d
+          .query('messages', where: 'id = ?', whereArgs: [m.id]);
+      if (rows.isNotEmpty && mounted) {
+        setState(() => _msg = StoredMessage.fromMap(rows.first));
+      }
+    } catch (_) {
+      // Quiet — cached body is shown; only fail loud if no cache.
+      if (mounted && _msg?.bodyHtml == null && _msg?.bodyPlain == null) {
+        setState(() => _error = 'Could not load message body');
+      }
     } finally {
       await imap.disconnect();
     }
@@ -468,13 +485,7 @@ class _MessageViewPageState extends ConsumerState<MessageViewPage> {
           const SizedBox(height: 12),
           if (a != null) _buildHeader(context, m, a, dateStr),
           const Divider(height: 24),
-          if (_full == null)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 24),
-              child: Center(child: CircularProgressIndicator()),
-            )
-          else
-            _buildBody(),
+          _buildBody(),
           if (_full != null) ..._buildAttachments(),
         ],
       ),
@@ -485,123 +496,175 @@ class _MessageViewPageState extends ConsumerState<MessageViewPage> {
       BuildContext context, StoredMessage m, Account a, String dateStr) {
     final fromAddr = m.fromAddr ?? '';
     final fromName = m.fromName ?? '';
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        InkWell(
-          onTap: () => AddressActions.show(
-            context,
-            email: fromAddr,
-            name: fromName.isEmpty ? null : fromName,
-            composeAccountId: a.id,
-            onShowFullHeaders: _showHeaders,
-          ),
-          onLongPress: () => AddressActions.show(
-            context,
-            email: fromAddr,
-            name: fromName.isEmpty ? null : fromName,
-            composeAccountId: a.id,
-            onShowFullHeaders: _showHeaders,
-          ),
-          borderRadius: BorderRadius.circular(8),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 6),
-            child: Row(
-              children: [
-                CircleAvatar(
-                  child: Text(((fromName.isNotEmpty ? fromName : fromAddr)
-                          .characters
-                          .firstOrNull ??
-                          '?')
-                      .toUpperCase()),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
+    final displayName = fromName.isNotEmpty ? fromName : fromAddr;
+    final scheme = Theme.of(context).colorScheme;
+    final mutedStyle = Theme.of(context)
+        .textTheme
+        .bodySmall
+        ?.copyWith(color: scheme.onSurfaceVariant);
+    return InkWell(
+      onTap: () => AddressActions.show(
+        context,
+        email: fromAddr,
+        name: fromName.isEmpty ? null : fromName,
+        composeAccountId: a.id,
+        onShowFullHeaders: _showHeaders,
+      ),
+      onLongPress: () => AddressActions.show(
+        context,
+        email: fromAddr,
+        name: fromName.isEmpty ? null : fromName,
+        composeAccountId: a.id,
+        onShowFullHeaders: _showHeaders,
+      ),
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            CircleAvatar(
+              radius: 22,
+              backgroundColor: scheme.primaryContainer,
+              foregroundColor: scheme.onPrimaryContainer,
+              child: Text(
+                (displayName.characters.firstOrNull ?? '?').toUpperCase(),
+                style: const TextStyle(
+                    fontSize: 18, fontWeight: FontWeight.w600),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(fromName.isNotEmpty ? fromName : fromAddr,
-                          style: Theme.of(context).textTheme.bodyLarge),
-                      if (fromName.isNotEmpty)
-                        Text(fromAddr,
-                            style: Theme.of(context).textTheme.bodySmall),
-                      Text(dateStr,
-                          style: Theme.of(context).textTheme.bodySmall),
+                      Expanded(
+                        child: Text(
+                          displayName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context)
+                              .textTheme
+                              .titleMedium
+                              ?.copyWith(fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                      if (dateStr.isNotEmpty) ...[
+                        const SizedBox(width: 8),
+                        Text(dateStr, style: mutedStyle),
+                      ],
                     ],
                   ),
-                ),
-              ],
+                  if (fromName.isNotEmpty && fromAddr.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text(
+                        fromAddr,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: mutedStyle,
+                      ),
+                    ),
+                  if ((m.toAddrs ?? '').isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: _recipientLine(context, 'to', m.toAddrs!, a),
+                    ),
+                  if ((m.ccAddrs ?? '').isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: _recipientLine(context, 'cc', m.ccAddrs!, a),
+                    ),
+                ],
+              ),
             ),
-          ),
+          ],
         ),
-        const SizedBox(height: 8),
-        if ((m.toAddrs ?? '').isNotEmpty)
-          _addressChips(context, 'To', m.toAddrs!, a),
-        if ((m.ccAddrs ?? '').isNotEmpty)
-          _addressChips(context, 'Cc', m.ccAddrs!, a),
-      ],
+      ),
     );
   }
 
-  Widget _addressChips(
+  Widget _recipientLine(
       BuildContext context, String label, String csv, Account a) {
+    final scheme = Theme.of(context).colorScheme;
     final addrs = csv
         .split(',')
         .map((s) => s.trim())
         .where((s) => s.isNotEmpty)
         .toList();
-    return Padding(
-      padding: const EdgeInsets.only(top: 4),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 32,
-            child: Text('$label:',
-                style: Theme.of(context).textTheme.bodySmall),
-          ),
-          Expanded(
-            child: Wrap(
-              spacing: 6,
-              runSpacing: 4,
-              children: addrs
-                  .map((email) => InputChip(
-                        avatar: CircleAvatar(
+    final summary = addrs.length <= 2
+        ? addrs.join(', ')
+        : '${addrs.first}, +${addrs.length - 1} more';
+    return InkWell(
+      borderRadius: BorderRadius.circular(6),
+      onTap: () {
+        if (addrs.length == 1) {
+          AddressActions.show(context,
+              email: addrs.first, composeAccountId: a.id);
+        } else {
+          showModalBottomSheet<void>(
+            context: context,
+            showDragHandle: true,
+            builder: (ctx) => SafeArea(
+              child: ListView(
+                shrinkWrap: true,
+                children: [
+                  ListTile(
+                    title: Text('${label.toUpperCase()} (${addrs.length})',
+                        style:
+                            const TextStyle(fontWeight: FontWeight.bold)),
+                  ),
+                  const Divider(height: 1),
+                  ...addrs.map((email) => ListTile(
+                        leading: CircleAvatar(
                           child: Text(
                               (email.characters.firstOrNull ?? '?')
-                                  .toUpperCase(),
-                              style: const TextStyle(fontSize: 12)),
+                                  .toUpperCase()),
                         ),
-                        label: Text(email),
-                        onPressed: () => AddressActions.show(
-                          context,
-                          email: email,
-                          composeAccountId: a.id,
-                        ),
-                      ))
-                  .toList(),
+                        title: Text(email),
+                        onTap: () {
+                          Navigator.of(ctx).pop();
+                          AddressActions.show(context,
+                              email: email, composeAccountId: a.id);
+                        },
+                      )),
+                ],
+              ),
             ),
-          ),
-        ],
+          );
+        }
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: Text(
+          '$label: $summary',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: Theme.of(context)
+              .textTheme
+              .bodySmall
+              ?.copyWith(color: scheme.onSurfaceVariant),
+        ),
       ),
     );
   }
 
   Widget _buildBody() {
-    final full = _full!;
-    final html = full.decodeTextHtmlPart();
-    final plain = full.decodeTextPlainPart();
+    final m = _msg;
+    final full = _full;
+    final html = full?.decodeTextHtmlPart() ?? m?.bodyHtml;
+    final plain = full?.decodeTextPlainPart() ?? m?.bodyPlain;
     if (html != null && html.isNotEmpty) {
-      String htmlBody;
-      if (_allowRemote) {
-        htmlBody = html;
-      } else {
-        htmlBody = _stripRemote(html);
-      }
+      final hasRemote = _hasRemoteContent(html);
+      final blocking = !_allowRemote && hasRemote;
+      final htmlBody = blocking ? _stripRemote(html) : html;
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (!_allowRemote)
+          if (blocking)
             Card(
               color: Theme.of(context).colorScheme.surfaceContainerHighest,
               child: ListTile(
@@ -620,11 +683,34 @@ class _MessageViewPageState extends ConsumerState<MessageViewPage> {
             onTapUrl: _onTapUrl,
             renderMode: RenderMode.column,
           ),
-          if (plain != null && plain.isEmpty) Text(plain),
         ],
       );
     }
-    return SelectableText(plain ?? '(no body)');
+    if (plain != null && plain.isNotEmpty) {
+      return SelectableText(plain);
+    }
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 16),
+      child: Row(
+        children: [
+          const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2)),
+          const SizedBox(width: 12),
+          Text('Loading body…',
+              style: Theme.of(context).textTheme.bodySmall),
+        ],
+      ),
+    );
+  }
+
+  static final RegExp _remoteRegex = RegExp(
+      r'''(?:src|background|poster)\s*=\s*["']?https?://|url\(\s*["']?https?://''',
+      caseSensitive: false);
+
+  bool _hasRemoteContent(String html) {
+    return _remoteRegex.hasMatch(html);
   }
 
   String _stripRemote(String html) {

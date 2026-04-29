@@ -35,6 +35,10 @@ class SyncService {
           body: a.email,
         );
       }
+      // Pre-cache message bodies so opening a mail is instant offline.
+      try {
+        await imap.prefetchBodies(targetPath, limit: 25);
+      } catch (_) {}
     } finally {
       await imap.disconnect();
     }

@@ -159,9 +159,49 @@ class ImapService {
     return false;
   }
 
-  String? _addrsJoin(List<MailAddress>? addrs) {
-    if (addrs == null || addrs.isEmpty) return null;
-    return addrs.map((a) => a.email).join(',');
+  Future<int> prefetchBodies(String folderPath, {int limit = 25}) async {
+    final c = await _connect();
+    await c.selectMailboxByPath(folderPath);
+    final d = await AppDb.instance.db;
+    final rows = await d.query(
+      'messages',
+      columns: ['id', 'uid'],
+      where:
+          'account_id = ? AND folder_path = ? AND full_fetched = 0',
+      whereArgs: [account.id, folderPath],
+      orderBy: 'date DESC',
+      limit: limit,
+    );
+    if (rows.isEmpty) return 0;
+    int fetched = 0;
+    for (final r in rows) {
+      final uid = r['uid'] as int;
+      final id = r['id'] as int;
+      try {
+        final res = await c.uidFetchMessages(
+            MessageSequence.fromIds([uid], isUid: true), 'BODY.PEEK[]');
+        if (res.messages.isEmpty) continue;
+        final full = res.messages.first;
+        final plain = full.decodeTextPlainPart();
+        final html = full.decodeTextHtmlPart();
+        await d.update(
+            'messages',
+            {
+              'body_plain': plain,
+              'body_html': html,
+              'preview': plain == null
+                  ? null
+                  : (plain.length > 200 ? plain.substring(0, 200) : plain),
+              'full_fetched': 1,
+            },
+            where: 'id = ?',
+            whereArgs: [id]);
+        fetched++;
+      } catch (_) {
+        // skip — try next on transient errors
+      }
+    }
+    return fetched;
   }
 
   Future<MimeMessage> fetchFull(String folderPath, int uid) async {
