@@ -23,7 +23,7 @@ class ChukmailApp extends StatelessWidget {
   Widget build(BuildContext context) {
     final router = buildRouter();
     return MaterialApp.router(
-      title: 'chukmail',
+      title: 'Chuk Mail',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(

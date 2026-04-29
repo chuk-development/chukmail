@@ -45,7 +45,7 @@ class _MailboxPageState extends ConsumerState<MailboxPage> {
       data: (accounts) {
         if (accounts.isEmpty) {
           return Scaffold(
-            appBar: AppBar(title: const Text('chukmail')),
+            appBar: AppBar(title: const Text('Chuk Mail')),
             body: Center(
               child: Padding(
                 padding: const EdgeInsets.all(24),
