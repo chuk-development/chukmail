@@ -19,11 +19,26 @@ GoRouter buildRouter() => GoRouter(
         ),
         GoRoute(
           path: '/compose',
-          builder: (_, st) => ComposePage(
-            accountId: st.uri.queryParameters['account'],
-            toAddr: st.uri.queryParameters['to'],
-            subject: st.uri.queryParameters['subject'],
-          ),
+          builder: (_, st) {
+            final extra = st.extra;
+            if (extra is ComposeExtra) {
+              return ComposePage(
+                accountId: extra.accountId ?? st.uri.queryParameters['account'],
+                toAddr: extra.toAddr ?? st.uri.queryParameters['to'],
+                ccAddr: extra.ccAddr,
+                subject: extra.subject ?? st.uri.queryParameters['subject'],
+                quoteBody: extra.quoteBody,
+                inReplyTo: extra.inReplyTo,
+                references: extra.references,
+                isForward: extra.isForward,
+              );
+            }
+            return ComposePage(
+              accountId: st.uri.queryParameters['account'],
+              toAddr: st.uri.queryParameters['to'],
+              subject: st.uri.queryParameters['subject'],
+            );
+          },
         ),
         GoRoute(
           path: '/settings',
